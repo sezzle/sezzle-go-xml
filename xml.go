@@ -41,10 +41,11 @@ func (e *SyntaxError) Error() string {
 // is given as a canonical URL, not the short prefix used
 // in the document being parsed.
 type Name struct {
-	Space, Local string
+	Space, Prefix, Local string
 }
 
-// An Attr represents an attribute in an XML element (Name=Value).
+// An Attr represents an attribute in an XML element with Name.Prefix:Name.Local="Value".
+// Extra namespaces are encoded by xmlns:Name.Prefix="Name.Space"
 type Attr struct {
 	Name  Name
 	Value string

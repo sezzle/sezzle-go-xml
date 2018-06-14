@@ -312,10 +312,10 @@ type printer struct {
 }
 
 // createAttrPrefix finds the name space prefix attribute to use for the given name space,
-// defining a new prefix if necessary. It returns the prefix.
-func (p *printer) createAttrPrefix(url string) string {
+// defining a new prefix if necessary.
+func (p *printer) createAttrPrefix(prefix, url string) {
 	if prefix := p.attrPrefix[url]; prefix != "" {
-		return prefix
+		return
 	}
 
 	// The "http://www.w3.org/XML/1998/namespace" name space is predefined as "xml"
@@ -323,7 +323,7 @@ func (p *printer) createAttrPrefix(url string) string {
 	// (The "http://www.w3.org/2000/xmlns/" name space is also predefined as "xmlns",
 	// but users should not be trying to use that one directly - that's our job.)
 	if url == xmlURL {
-		return xmlPrefix
+		return
 	}
 
 	// Need to define a new name space.
@@ -332,18 +332,15 @@ func (p *printer) createAttrPrefix(url string) string {
 		p.attrNS = make(map[string]string)
 	}
 
-	// Pick a name. We try to use the final element of the path
-	// but fall back to _.
-	prefix := strings.TrimRight(url, "/")
-	if i := strings.LastIndex(prefix, "/"); i >= 0 {
+	/*if i := strings.LastIndex(prefix, "/"); i >= 0 {
 		prefix = prefix[i+1:]
-	}
-	if prefix == "" || !isName([]byte(prefix)) || strings.Contains(prefix, ":") {
-		prefix = "_"
 	}
 	if strings.HasPrefix(prefix, "xml") {
 		// xmlanything is reserved.
 		prefix = "_" + prefix
+	}*/
+	if prefix == "" || !isName([]byte(prefix)) || strings.Contains(prefix, ":") {
+		prefix = "_"
 	}
 	if p.attrNS[prefix] != "" {
 		// Name is taken. Find a better one.
@@ -358,15 +355,13 @@ func (p *printer) createAttrPrefix(url string) string {
 	p.attrPrefix[url] = prefix
 	p.attrNS[prefix] = url
 
-	p.WriteString(`xmlns:`)
+	/*p.WriteString(`xmlns:`)
 	p.WriteString(prefix)
 	p.WriteString(`="`)
 	EscapeText(p, []byte(url))
-	p.WriteString(`" `)
+	p.WriteString(`" `)*/
 
 	p.prefixes = append(p.prefixes, prefix)
-
-	return prefix
 }
 
 // deleteAttrPrefix removes an attribute name space prefix.
@@ -689,10 +684,21 @@ func (p *printer) writeStart(start *StartElement) error {
 
 	p.writeIndent(1)
 	p.WriteByte('<')
+	if start.Name.Prefix != "" {
+		p.createAttrPrefix(start.Name.Prefix, start.Name.Space)
+		p.WriteString(start.Name.Prefix)
+		p.WriteByte(':')
+	}
 	p.WriteString(start.Name.Local)
 
 	if start.Name.Space != "" {
-		p.WriteString(` xmlns="`)
+		p.WriteString(` xmlns`)
+		if start.Name.Prefix != "" {
+			p.WriteByte(':')
+			p.WriteString(start.Name.Prefix)
+		}
+		p.WriteByte('=')
+		p.WriteByte('"')
 		p.EscapeString(start.Name.Space)
 		p.WriteByte('"')
 	}
@@ -703,15 +709,46 @@ func (p *printer) writeStart(start *StartElement) error {
 		if name.Local == "" {
 			continue
 		}
+
 		p.WriteByte(' ')
-		if name.Space != "" {
-			p.WriteString(p.createAttrPrefix(name.Space))
-			p.WriteByte(':')
+		if attr.Value != "" {
+			if name.Prefix != "" {
+				if _, ok := p.attrNS[name.Prefix]; ok {
+					p.WriteString(name.Prefix)
+					p.WriteByte(':')
+				} else {
+					// might possibly want more complex handling here
+					return fmt.Errorf("xml: using undeclared prefix %s for attribute %s", name.Prefix, name.Local)
+				}
+			}
+			p.WriteString(name.Local)
+			p.WriteString(`="`)
+			p.EscapeString(attr.Value)
+			p.WriteByte('"')
+		} else {
+			p.WriteString("xmlns")
+			if name.Prefix != "" {
+				p.createAttrPrefix(name.Prefix, name.Space)
+				p.WriteByte(':')
+				p.WriteString(name.Prefix)
+			}
+			p.WriteString(`="`)
+			p.EscapeString(name.Space)
+			p.WriteByte('"')
 		}
-		p.WriteString(name.Local)
-		p.WriteString(`="`)
-		p.EscapeString(attr.Value)
-		p.WriteByte('"')
+
+		/*
+			p.WriteByte(' ')
+			p.WriteString("xmlns")
+			if name.Space != "" {
+				p.createAttrPrefix(name.Prefix, name.Space)
+				p.WriteByte(':')
+				p.WriteString(name.Local)
+			}
+			p.WriteString(`="`)
+			p.EscapeString(attr.Value)
+			p.WriteByte('"')
+		*/
 	}
 	p.WriteByte('>')
 	return nil
@@ -730,11 +767,18 @@ func (p *printer) writeEnd(name Name) error {
 		}
 		return fmt.Errorf("xml: end tag </%s> in namespace %s does not match start tag <%s> in namespace %s", name.Local, name.Space, top.Local, top.Space)
 	}
+	if _, ok := p.attrNS[name.Prefix]; name.Prefix != "" && !ok {
+		return fmt.Errorf("xml: prefix %s namespace not found", name.Prefix)
+	}
 	p.tags = p.tags[:len(p.tags)-1]
 
 	p.writeIndent(-1)
 	p.WriteByte('<')
 	p.WriteByte('/')
+	if name.Prefix != "" {
+		p.WriteString(name.Prefix)
+		p.WriteByte(':')
+	}
 	p.WriteString(name.Local)
 	p.WriteByte('>')
 	p.popPrefix()
